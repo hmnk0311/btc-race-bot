@@ -81,8 +81,8 @@ let trough: number | null = null;
 let wasHolding = false;
 /** Whether the bot has ever held (the first entry is immediate; later entries use the re-entry rule). */
 let hasHeld = false;
-/** Last batch seq on which an entry buy was sent, so a rejected first entry can be retried. */
-let lastEntrySeq = -10;
+/** How many first-entry buys have been sent, so a rejected first entry can be retried a few times. */
+let entryAttempts = 0;
 
 function entrySize(state: BarsState): bigint {
   return (state.cash * ENTRY_NUM) / ENTRY_DEN;
@@ -135,18 +135,20 @@ await runBars({
       return [];
     }
 
-    // Flat. First entry: buy on the first batch that prices the symbol,
-    // and retry on the next bars if the market refused it (no bar at the
-    // next open, or a gap past the slippage cap), at most a few times.
+    // Flat. First entry: buy on the first batch that prices the symbol.
+    // If the market refused it (no bar at the next open, or a gap past
+    // the slippage cap), the position simply never appears, so retry on
+    // the following bars while still flat, at most 6 attempts in all:
+    // after that the opening move is gone and the re-entry rule, not a
+    // chase, is the way back in if the market later sets up again.
     if (!hasHeld) {
-      if (batch.seq === 0 || (batch.seq <= 5 && lastEntrySeq >= 0 && batch.seq > lastEntrySeq)) {
+      if (entryAttempts < 6) {
         const order = buyOrder(state);
         if (order !== null) {
-          lastEntrySeq = batch.seq;
+          entryAttempts++;
           return [order];
         }
       }
-      if (batch.seq === 0) lastEntrySeq = 0;
       return [];
     }
 
